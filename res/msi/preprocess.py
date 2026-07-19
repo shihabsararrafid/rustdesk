@@ -159,13 +159,16 @@ def gen_auto_component(app_name, dist_dir):
 def gen_pre_vars(args, dist_dir):
     def func(lines, index_start):
         upgrade_code = uuid.uuid5(uuid.NAMESPACE_OID, args.app_name + ".exe")
+        # Product must remain the on-disk exe/install-folder basename. DisplayName
+        # is only for installer UI / ARP text and may contain spaces.
         display_name = getattr(args, "display_name", None) or args.app_name
 
         indent = g_indent_unit * 1
         to_insert_lines = [
             f'{indent}<?define Version="{g_version}" ?>\n',
             f'{indent}<?define Manufacturer="{args.manufacturer}" ?>\n',
-            f'{indent}<?define Product="{display_name}" ?>\n',
+            f'{indent}<?define Product="{args.app_name}" ?>\n',
+            f'{indent}<?define ProductDisplay="{display_name}" ?>\n',
             f'{indent}<?define Description="{display_name} Installer" ?>\n',
             f'{indent}<?define ProductLower="{args.app_name.lower()}" ?>\n',
             f'{indent}<?define RegKeyRoot=".$(var.ProductLower)" ?>\n',
@@ -568,4 +571,5 @@ if __name__ == "__main__":
         sys.exit(-1)
 
     replace_app_name_in_langs(display_name)
-    replace_app_name_in_custom_actions(display_name)
+    # Custom actions talk to the on-disk exe/service name, not the display name.
+    replace_app_name_in_custom_actions(app_name)
