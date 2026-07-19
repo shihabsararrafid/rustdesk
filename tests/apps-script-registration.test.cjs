@@ -182,6 +182,9 @@ function createMockRuntime(options = {}) {
     },
     __rows: rows,
     __emails: emails,
+    __setProperty(key, value) {
+      properties[key] = value;
+    },
     setMailShouldFail(value, error) {
       mailShouldFail = value;
       if (error) options.mailError = error;
@@ -209,6 +212,22 @@ test("rejects invalid token and unapproved fields", () => {
   assert.equal(validateRegistration({ token: "wrong" }, "token").ok, false);
   const payload = validPayload();
   payload.public_ip = "203.0.113.1";
+  assert.equal(validateRegistration(payload, "token").ok, false);
+});
+
+test("rejects missing or invalid expected token before payload comparison", () => {
+  const validateRegistration = loadValidation();
+  const payload = validPayload();
+  assert.equal(validateRegistration(payload, null).ok, false);
+  assert.equal(validateRegistration(payload, "").ok, false);
+  assert.equal(validateRegistration(payload, undefined).ok, false);
+  assert.equal(validateRegistration(payload, 123).ok, false);
+});
+
+test("rejects payload token null", () => {
+  const validateRegistration = loadValidation();
+  const payload = validPayload();
+  payload.token = null;
   assert.equal(validateRegistration(payload, "token").ok, false);
 });
 
@@ -274,7 +293,7 @@ test("doPost rejects unexpected fields", () => {
   assert.deepEqual(response, { accepted: false, error: "unexpected_field" });
 });
 
-test("concurrent duplicate requests remain idempotent under lock", () => {
+test("sequential duplicate requests remain idempotent under lock", () => {
   const runtime = createMockRuntime();
   const cleaned = runtime.validateRegistration(validPayload(), "token").value;
   const properties = runtime.PropertiesService.getScriptProperties();
@@ -286,6 +305,69 @@ test("concurrent duplicate requests remain idempotent under lock", () => {
   assert.equal(second.accepted, true);
   assert.equal(second.duplicate, true);
   assert.equal(runtime.__rows.length, 3);
+  assert.equal(runtime.__emails.length, 1);
+});
+
+test("doPost rejects missing CLIENT_TOKEN without creating rows", () => {
+  const runtime = createMockRuntime({
+    properties: { SHEET_ID: "sheet-id", RECIPIENT_EMAIL: "ops@example.com", CLIENT_TOKEN: "" },
+  });
+  const response = parseResponse(
+    runtime.doPost({ postData: { contents: JSON.stringify(validPayload()) } })
+  );
+
+  assert.deepEqual(response, { accepted: false, error: "unauthorized" });
+  assert.equal(runtime.__rows.length, 2);
+  assert.equal(runtime.__emails.length, 0);
+});
+
+test("doPost rejects missing SHEET_ID without creating rows", () => {
+  const runtime = createMockRuntime({
+    properties: { SHEET_ID: "", RECIPIENT_EMAIL: "ops@example.com", CLIENT_TOKEN: "token" },
+  });
+  const response = parseResponse(
+    runtime.doPost({ postData: { contents: JSON.stringify(validPayload()) } })
+  );
+
+  assert.deepEqual(response, { accepted: false, error: "missing_sheet_id" });
+  assert.equal(runtime.__rows.length, 2);
+  assert.equal(runtime.__emails.length, 0);
+});
+
+test("doPost rejects missing RECIPIENT_EMAIL without creating rows", () => {
+  const runtime = createMockRuntime({
+    properties: { SHEET_ID: "sheet-id", RECIPIENT_EMAIL: "", CLIENT_TOKEN: "token" },
+  });
+  const response = parseResponse(
+    runtime.doPost({ postData: { contents: JSON.stringify(validPayload()) } })
+  );
+
+  assert.deepEqual(response, { accepted: false, error: "missing_recipient_email" });
+  assert.equal(runtime.__rows.length, 2);
+  assert.equal(runtime.__emails.length, 0);
+});
+
+test("doPost accepts a registration after deployment properties are corrected", () => {
+  const runtime = createMockRuntime({
+    properties: { SHEET_ID: "", RECIPIENT_EMAIL: "ops@example.com", CLIENT_TOKEN: "token" },
+  });
+  const payload = validPayload();
+  let response = parseResponse(
+    runtime.doPost({ postData: { contents: JSON.stringify(payload) } })
+  );
+
+  assert.deepEqual(response, { accepted: false, error: "missing_sheet_id" });
+  assert.equal(runtime.__rows.length, 2);
+  assert.equal(runtime.__emails.length, 0);
+
+  runtime.__setProperty("SHEET_ID", "sheet-id");
+  response = parseResponse(
+    runtime.doPost({ postData: { contents: JSON.stringify(payload) } })
+  );
+
+  assert.deepEqual(response, { accepted: true, duplicate: false });
+  assert.equal(runtime.__rows.length, 3);
+  assert.equal(runtime.__rows[2][7], "email_sent");
   assert.equal(runtime.__emails.length, 1);
 });
 

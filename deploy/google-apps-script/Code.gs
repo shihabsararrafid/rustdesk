@@ -25,7 +25,22 @@ function doPost(e) {
   }
 }
 
+function validateDeploymentProperties_(properties) {
+  const sheetId = properties.getProperty("SHEET_ID");
+  if (typeof sheetId !== "string" || !sheetId) {
+    return { ok: false, error: "missing_sheet_id" };
+  }
+  const recipient = properties.getProperty("RECIPIENT_EMAIL");
+  if (typeof recipient !== "string" || !recipient) {
+    return { ok: false, error: "missing_recipient_email" };
+  }
+  return { ok: true };
+}
+
 function recordRegistration_(data, properties) {
+  const config = validateDeploymentProperties_(properties);
+  if (!config.ok) return { accepted: false, error: config.error };
+
   const lock = LockService.getScriptLock();
   lock.waitLock(10000);
   try {

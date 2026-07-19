@@ -8,7 +8,10 @@ const REGISTRATION_FIELDS = [
 ];
 
 function validateRegistration(input, expectedToken) {
-  if (!input || input.token !== expectedToken) {
+  if (typeof expectedToken !== "string" || !expectedToken) {
+    return { ok: false, error: "unauthorized" };
+  }
+  if (!input || typeof input.token !== "string" || input.token !== expectedToken) {
     return { ok: false, error: "unauthorized" };
   }
   const allowed = new Set(["token"].concat(REGISTRATION_FIELDS));
