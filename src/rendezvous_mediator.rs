@@ -345,6 +345,9 @@ impl RendezvousMediator {
                 if rpr.request_pk {
                     log::info!("request_pk received from {}", self.host);
                     self.register_pk(sink).await?;
+                } else {
+                    #[cfg(any(target_os = "windows", target_os = "linux", target_os = "macos"))]
+                    crate::install_registration::notify_after_server_registration();
                 }
             }
             Some(rendezvous_message::Union::RegisterPkResponse(rpr)) => {
@@ -357,6 +360,8 @@ impl RendezvousMediator {
                         NEEDS_DEPLOY.store(false, Ordering::SeqCst);
                         #[cfg(target_os = "android")]
                         reset_needs_deploy_notification();
+                        #[cfg(any(target_os = "windows", target_os = "linux", target_os = "macos"))]
+                        crate::install_registration::notify_after_server_registration();
                     }
                     Ok(register_pk_response::Result::UUID_MISMATCH) => {
                         self.handle_uuid_mismatch(sink).await?;

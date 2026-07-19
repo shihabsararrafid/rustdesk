@@ -1,6 +1,10 @@
 use chrono::Utc;
 use hbb_common::config::Config;
 use serde::{Deserialize, Serialize};
+use std::{
+    sync::atomic::{AtomicBool, Ordering},
+    time::Duration,
+};
 use uuid::Uuid;
 
 const INSTALLATION_ID_OPTION: &str = "sasthotech-installation-id";
@@ -54,6 +58,113 @@ fn is_notified() -> bool {
 
 fn mark_notified() {
     Config::set_option(NOTIFIED_OPTION.to_owned(), "Y".to_owned());
+}
+
+#[derive(Serialize)]
+struct RegistrationRequest<'a> {
+    token: &'a str,
+    #[serde(flatten)]
+    payload: &'a RegistrationPayload,
+}
+
+#[derive(Debug, Deserialize)]
+struct RegistrationResponse {
+    accepted: bool,
+    #[serde(default)]
+    duplicate: bool,
+}
+
+fn parse_response(body: &str) -> bool {
+    serde_json::from_str::<RegistrationResponse>(body)
+        .map(|response| response.accepted)
+        .unwrap_or(false)
+}
+
+static IN_FLIGHT: AtomicBool = AtomicBool::new(false);
+static EXHAUSTED_THIS_PROCESS: AtomicBool = AtomicBool::new(false);
+
+fn endpoint_config() -> Option<(&'static str, &'static str)> {
+    let url = option_env!("SASTHOTECH_REGISTRATION_URL")?.trim();
+    let token = option_env!("SASTHOTECH_REGISTRATION_TOKEN")?.trim();
+    if url.starts_with("https://") && !token.is_empty() {
+        Some((url, token))
+    } else {
+        None
+    }
+}
+
+async fn send_registration(
+    url: &str,
+    token: &str,
+    payload: &RegistrationPayload,
+) -> Result<bool, reqwest::Error> {
+    let client = reqwest::Client::builder()
+        .connect_timeout(Duration::from_secs(5))
+        .timeout(Duration::from_secs(10))
+        .redirect(reqwest::redirect::Policy::limited(3))
+        .build()?;
+    let response = client
+        .post(url)
+        .json(&RegistrationRequest { token, payload })
+        .send()
+        .await?
+        .error_for_status()?;
+    Ok(parse_response(&response.text().await?))
+}
+
+pub fn notify_after_server_registration() {
+    if is_notified() || EXHAUSTED_THIS_PROCESS.load(Ordering::SeqCst) {
+        return;
+    }
+    let Some((url, token)) = endpoint_config() else {
+        return;
+    };
+    if IN_FLIGHT
+        .compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)
+        .is_err()
+    {
+        return;
+    }
+    let payload = build_payload();
+    tokio::spawn(async move {
+        for delay_seconds in [0, 30, 120] {
+            if delay_seconds > 0 {
+                tokio::time::sleep(Duration::from_secs(delay_seconds)).await;
+            }
+            match send_registration(url, token, &payload).await {
+                Ok(true) => {
+                    mark_notified();
+                    IN_FLIGHT.store(false, Ordering::SeqCst);
+                    return;
+                }
+                Ok(false) => {
+                    log::warn!("Client registration webhook rejected the payload")
+                }
+                Err(error) => {
+                    log::warn!("Client registration webhook failed: {error}")
+                }
+            }
+        }
+        EXHAUSTED_THIS_PROCESS.store(true, Ordering::SeqCst);
+        IN_FLIGHT.store(false, Ordering::SeqCst);
+    });
+}
+
+#[cfg(test)]
+mod response_tests {
+    use super::*;
+
+    #[test]
+    fn accepts_new_and_duplicate_success_responses() {
+        assert!(parse_response(r#"{"accepted":true,"duplicate":false}"#));
+        assert!(parse_response(r#"{"accepted":true,"duplicate":true}"#));
+    }
+
+    #[test]
+    fn rejects_malformed_or_negative_responses() {
+        assert!(!parse_response("not json"));
+        assert!(!parse_response(r#"{"accepted":false}"#));
+    }
 }
 
 #[cfg(test)]
