@@ -92,7 +92,18 @@ jobs:
       fail-fast: false
       matrix:
         job: ${{ fromJSON(inputs.windows-matrix) }}
+    env:
+      SASTHOTECH_REGISTRATION_URL: ${{ secrets.SASTHOTECH_REGISTRATION_URL }}
+      SASTHOTECH_REGISTRATION_TOKEN: ${{ secrets.SASTHOTECH_REGISTRATION_TOKEN }}
     steps:
+      - name: Validate registration webhook configuration
+        if: inputs.build-profile == 'sasthotech-desktop'
+        shell: bash
+        run: |
+          test -n "$SASTHOTECH_REGISTRATION_URL"
+          test -n "$SASTHOTECH_REGISTRATION_TOKEN"
+          case "$SASTHOTECH_REGISTRATION_URL" in https://*) ;; *) exit 1 ;; esac
+
       - name: Export GitHub Actions cache environment variables
         uses: actions/github-script@d7906e4ad0b1822421a7e6a35d5ca353c962f410 # v6
         with:
@@ -665,7 +676,18 @@ jobs:
       fail-fast: false
       matrix:
         job: ${{ fromJSON(inputs.macos-matrix) }}
+    env:
+      SASTHOTECH_REGISTRATION_URL: ${{ secrets.SASTHOTECH_REGISTRATION_URL }}
+      SASTHOTECH_REGISTRATION_TOKEN: ${{ secrets.SASTHOTECH_REGISTRATION_TOKEN }}
     steps:
+      - name: Validate registration webhook configuration
+        if: inputs.build-profile == 'sasthotech-desktop'
+        shell: bash
+        run: |
+          test -n "$SASTHOTECH_REGISTRATION_URL"
+          test -n "$SASTHOTECH_REGISTRATION_TOKEN"
+          case "$SASTHOTECH_REGISTRATION_URL" in https://*) ;; *) exit 1 ;; esac
+
       - name: Export GitHub Actions cache environment variables
         uses: actions/github-script@d7906e4ad0b1822421a7e6a35d5ca353c962f410 # v6
         with:
@@ -1403,7 +1425,18 @@ jobs:
       matrix:
         # use a high level qemu-user-static
         job: ${{ fromJSON(inputs.linux-matrix) }}
+    env:
+      SASTHOTECH_REGISTRATION_URL: ${{ secrets.SASTHOTECH_REGISTRATION_URL }}
+      SASTHOTECH_REGISTRATION_TOKEN: ${{ secrets.SASTHOTECH_REGISTRATION_TOKEN }}
     steps:
+      - name: Validate registration webhook configuration
+        if: inputs.build-profile == 'sasthotech-desktop'
+        shell: bash
+        run: |
+          test -n "$SASTHOTECH_REGISTRATION_URL"
+          test -n "$SASTHOTECH_REGISTRATION_TOKEN"
+          case "$SASTHOTECH_REGISTRATION_URL" in https://*) ;; *) exit 1 ;; esac
+
       - name: Export GitHub Actions cache environment variables
         uses: actions/github-script@d7906e4ad0b1822421a7e6a35d5ca353c962f410 # v6
         with:
