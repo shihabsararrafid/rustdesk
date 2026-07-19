@@ -846,9 +846,14 @@ jobs:
 
       - name: Rename rustdesk
         if: env.UPLOAD_ARTIFACT == 'true'
+        shell: bash
         run: |
+          target="sasthotech-remote-${{ env.VERSION }}-${{ matrix.job.arch }}.dmg"
           for name in sasthotech-remote*.dmg; do
-              mv "$name" "${name%%.dmg}-${{ matrix.job.arch }}.dmg"
+            if [ "$name" = "$target" ]; then
+              continue
+            fi
+            mv "$name" "$target"
           done
 
       - name: Upload Sasthotech macOS installer

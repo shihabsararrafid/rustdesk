@@ -212,66 +212,143 @@ SASTHOTECH_INSTALLER_UPLOADS = [
     "Upload Sasthotech macOS installer",
 ]
 
-INSTALLER_UPLOAD_PUBLISH_PAIRS = [
-    ("Upload Sasthotech Windows installers", "Publish Release"),
-    ("Upload Sasthotech Linux installers", "Publish debian/rpm package"),
-    ("Upload Sasthotech macOS installer", "Publish DMG package"),
+INSTALLER_UPLOAD_JOB_PAIRS = [
+    (
+        "build-for-windows-flutter",
+        "Upload Sasthotech Windows installers",
+        "Publish Release",
+    ),
+    (
+        "build-rustdesk-linux",
+        "Upload Sasthotech Linux installers",
+        "Publish debian/rpm package",
+    ),
+    (
+        "build-for-macOS",
+        "Upload Sasthotech macOS installer",
+        "Publish DMG package",
+    ),
 ]
 
+UPLOAD_STEP_TO_JOB = {
+    step: job_id for job_id, step, _publish in INSTALLER_UPLOAD_JOB_PAIRS
+}
 
-def step_index(text: str, step_name: str) -> int:
+MACOS_DMG_TARGET = (
+    "sasthotech-remote-${{ env.VERSION }}-${{ matrix.job.arch }}.dmg"
+)
+
+
+def job_text_block(text: str, job_id: str) -> str:
+    pattern = re.compile(
+        rf"^  {re.escape(job_id)}:\n(.*?)(?=^  [a-zA-Z][\w-]+:|\Z)",
+        re.MULTILINE | re.DOTALL,
+    )
+    match = pattern.search(text)
+    if not match:
+        raise ValueError(f"job not found: {job_id}")
+    return match.group(0)
+
+
+def job_step_names_yaml(doc, job_id: str):
+    names = []
+    for step in doc["jobs"][job_id].get("steps", []):
+        if isinstance(step, dict) and "name" in step:
+            names.append(step["name"])
+    return names
+
+
+def step_index_in_job_yaml(doc, job_id: str, step_name: str) -> int:
+    names = job_step_names_yaml(doc, job_id)
+    if step_name not in names:
+        raise ValueError(f"{step_name} not in job {job_id}")
+    return names.index(step_name)
+
+
+def step_block_in_job(text: str, job_id: str, step_name: str) -> str:
+    block = job_text_block(text, job_id)
     marker = f"- name: {step_name}"
-    idx = text.find(marker)
-    if idx == -1:
-        raise ValueError(f"step not found: {step_name}")
-    return idx
-
-
-def step_block(text: str, step_name: str) -> str:
-    start = step_index(text, step_name)
-    next_step = text.find("\n      - name:", start + 1)
+    start = block.index(marker)
+    next_step = block.find("\n      - name:", start + 1)
     if next_step == -1:
-        next_step = len(text)
-    return text[start:next_step]
+        next_step = len(block)
+    return block[start:next_step]
 
 
 class InstallerUploadTests(unittest.TestCase):
     def setUp(self):
         self.workflow = BUILD.read_text()
+        if HAS_YAML:
+            with BUILD.open() as fh:
+                self.doc = yaml.safe_load(fh)
+            if "on" not in self.doc and True in self.doc:
+                self.doc["on"] = self.doc[True]
+        else:
+            self.doc = None
 
     def test_installer_uploads_precede_publish_steps(self):
-        for upload_name, publish_name in INSTALLER_UPLOAD_PUBLISH_PAIRS:
-            with self.subTest(upload=upload_name, publish=publish_name):
+        if HAS_YAML:
+            for job_id, upload_name, publish_name in INSTALLER_UPLOAD_JOB_PAIRS:
+                with self.subTest(job=job_id, mode="yaml"):
+                    self.assertLess(
+                        step_index_in_job_yaml(self.doc, job_id, upload_name),
+                        step_index_in_job_yaml(self.doc, job_id, publish_name),
+                    )
+        for job_id, upload_name, publish_name in INSTALLER_UPLOAD_JOB_PAIRS:
+            with self.subTest(job=job_id, mode="text"):
+                block = job_text_block(self.workflow, job_id)
                 self.assertLess(
-                    step_index(self.workflow, upload_name),
-                    step_index(self.workflow, publish_name),
+                    block.index(f"- name: {upload_name}"),
+                    block.index(f"- name: {publish_name}"),
                 )
 
     def test_sasthotech_uploads_use_if_no_files_found_error(self):
         for step_name in SASTHOTECH_INSTALLER_UPLOADS:
             with self.subTest(step=step_name):
-                block = step_block(self.workflow, step_name)
+                job_id = UPLOAD_STEP_TO_JOB[step_name]
+                block = step_block_in_job(self.workflow, job_id, step_name)
                 self.assertIn("if-no-files-found: error", block)
 
     def test_windows_installer_upload_uses_signoutput_globs(self):
-        block = step_block(self.workflow, "Upload Sasthotech Windows installers")
+        block = step_block_in_job(
+            self.workflow,
+            "build-for-windows-flutter",
+            "Upload Sasthotech Windows installers",
+        )
         self.assertIn("SignOutput/*.exe", block)
         self.assertIn("SignOutput/*.msi", block)
         self.assertIn("sasthotech-remote-windows-${{ matrix.job.arch }}", block)
 
     def test_linux_installer_upload_includes_deb_and_rpm(self):
-        block = step_block(self.workflow, "Upload Sasthotech Linux installers")
+        block = step_block_in_job(
+            self.workflow,
+            "build-rustdesk-linux",
+            "Upload Sasthotech Linux installers",
+        )
         self.assertIn("rustdesk-*.deb", block)
         self.assertIn("rustdesk-*.rpm", block)
         self.assertIn("sasthotech-remote-linux-${{ matrix.job.arch }}", block)
 
     def test_macos_installer_upload_uses_branded_dmg_path(self):
-        block = step_block(self.workflow, "Upload Sasthotech macOS installer")
-        self.assertIn(
-            "path: sasthotech-remote-${{ env.VERSION }}-${{ matrix.job.arch }}.dmg",
-            block,
+        block = step_block_in_job(
+            self.workflow,
+            "build-for-macOS",
+            "Upload Sasthotech macOS installer",
         )
+        self.assertIn(f"path: {MACOS_DMG_TARGET}", block)
         self.assertIn("sasthotech-remote-macos-${{ matrix.job.arch }}", block)
+
+    def test_macos_dmg_rename_is_idempotent(self):
+        block = step_block_in_job(
+            self.workflow, "build-for-macOS", "Rename rustdesk"
+        )
+        self.assertIn(MACOS_DMG_TARGET, block)
+        self.assertIn('[ "$name" = "$target" ]', block)
+        self.assertNotIn("${name%%.dmg}-${{ matrix.job.arch }}.dmg", block)
+        upload_block = step_block_in_job(
+            self.workflow, "build-for-macOS", "Upload Sasthotech macOS installer"
+        )
+        self.assertIn(f"path: {MACOS_DMG_TARGET}", upload_block)
 
 
 class WrapperWorkflowTests(unittest.TestCase):
