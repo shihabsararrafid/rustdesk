@@ -352,6 +352,26 @@ jobs:
         run: |
           BASE_URL=${{ env.SIGN_BASE_URL }} SECRET_KEY=${{ secrets.SIGN_SECRET_KEY }} python3 res/job.py sign_files ./SignOutput
 
+      - name: Rename Sasthotech Windows installers
+        if: env.UPLOAD_ARTIFACT == 'true'
+        shell: bash
+        run: |
+          for ext in exe msi; do
+            src="./SignOutput/rustdesk-${{ env.VERSION }}-${{ matrix.job.arch }}.$ext"
+            dst="./SignOutput/sasthotech-remote-${{ env.VERSION }}-${{ matrix.job.arch }}.$ext"
+            mv "$src" "$dst"
+          done
+
+      - name: Upload Sasthotech Windows installers
+        if: env.UPLOAD_ARTIFACT == 'true'
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: sasthotech-remote-windows-${{ matrix.job.arch }}
+          path: |
+            SignOutput/*.exe
+            SignOutput/*.msi
+          if-no-files-found: error
+
       - name: Publish Release
         continue-on-error: true
         uses: softprops/action-gh-release@de2c0eb89ae2a093876385947365aca7b0e5f844 # v1
@@ -360,8 +380,8 @@ jobs:
           prerelease: true
           tag_name: ${{ env.TAG_NAME }}
           files: |
-            ./SignOutput/rustdesk-*.msi
-            ./SignOutput/rustdesk-*.exe
+            ./SignOutput/sasthotech-remote-*.msi
+            ./SignOutput/sasthotech-remote-*.exe
 
   # The fallback for the flutter version, we use Sciter for 32bit Windows.
   build-for-windows-sciter:
@@ -830,6 +850,14 @@ jobs:
           for name in sasthotech-remote*.dmg; do
               mv "$name" "${name%%.dmg}-${{ matrix.job.arch }}.dmg"
           done
+
+      - name: Upload Sasthotech macOS installer
+        if: env.UPLOAD_ARTIFACT == 'true'
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: sasthotech-remote-macos-${{ matrix.job.arch }}
+          path: sasthotech-remote-${{ env.VERSION }}-${{ matrix.job.arch }}.dmg
+          if-no-files-found: error
 
       - name: Publish DMG package
         continue-on-error: true
@@ -1636,6 +1664,16 @@ jobs:
             for name in rustdesk*??.rpm; do
                 mv "$name" /workspace/"${name%%.rpm}-suse.rpm"
             done
+
+      - name: Upload Sasthotech Linux installers
+        if: env.UPLOAD_ARTIFACT == 'true'
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: sasthotech-remote-linux-${{ matrix.job.arch }}
+          path: |
+            rustdesk-*.deb
+            rustdesk-*.rpm
+          if-no-files-found: error
 
       - name: Publish debian/rpm package
         continue-on-error: true

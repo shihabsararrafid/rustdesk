@@ -206,6 +206,74 @@ class ReusableWorkflowTests(unittest.TestCase):
                     )
 
 
+SASTHOTECH_INSTALLER_UPLOADS = [
+    "Upload Sasthotech Windows installers",
+    "Upload Sasthotech Linux installers",
+    "Upload Sasthotech macOS installer",
+]
+
+INSTALLER_UPLOAD_PUBLISH_PAIRS = [
+    ("Upload Sasthotech Windows installers", "Publish Release"),
+    ("Upload Sasthotech Linux installers", "Publish debian/rpm package"),
+    ("Upload Sasthotech macOS installer", "Publish DMG package"),
+]
+
+
+def step_index(text: str, step_name: str) -> int:
+    marker = f"- name: {step_name}"
+    idx = text.find(marker)
+    if idx == -1:
+        raise ValueError(f"step not found: {step_name}")
+    return idx
+
+
+def step_block(text: str, step_name: str) -> str:
+    start = step_index(text, step_name)
+    next_step = text.find("\n      - name:", start + 1)
+    if next_step == -1:
+        next_step = len(text)
+    return text[start:next_step]
+
+
+class InstallerUploadTests(unittest.TestCase):
+    def setUp(self):
+        self.workflow = BUILD.read_text()
+
+    def test_installer_uploads_precede_publish_steps(self):
+        for upload_name, publish_name in INSTALLER_UPLOAD_PUBLISH_PAIRS:
+            with self.subTest(upload=upload_name, publish=publish_name):
+                self.assertLess(
+                    step_index(self.workflow, upload_name),
+                    step_index(self.workflow, publish_name),
+                )
+
+    def test_sasthotech_uploads_use_if_no_files_found_error(self):
+        for step_name in SASTHOTECH_INSTALLER_UPLOADS:
+            with self.subTest(step=step_name):
+                block = step_block(self.workflow, step_name)
+                self.assertIn("if-no-files-found: error", block)
+
+    def test_windows_installer_upload_uses_signoutput_globs(self):
+        block = step_block(self.workflow, "Upload Sasthotech Windows installers")
+        self.assertIn("SignOutput/*.exe", block)
+        self.assertIn("SignOutput/*.msi", block)
+        self.assertIn("sasthotech-remote-windows-${{ matrix.job.arch }}", block)
+
+    def test_linux_installer_upload_includes_deb_and_rpm(self):
+        block = step_block(self.workflow, "Upload Sasthotech Linux installers")
+        self.assertIn("rustdesk-*.deb", block)
+        self.assertIn("rustdesk-*.rpm", block)
+        self.assertIn("sasthotech-remote-linux-${{ matrix.job.arch }}", block)
+
+    def test_macos_installer_upload_uses_branded_dmg_path(self):
+        block = step_block(self.workflow, "Upload Sasthotech macOS installer")
+        self.assertIn(
+            "path: sasthotech-remote-${{ env.VERSION }}-${{ matrix.job.arch }}.dmg",
+            block,
+        )
+        self.assertIn("sasthotech-remote-macos-${{ matrix.job.arch }}", block)
+
+
 class WrapperWorkflowTests(unittest.TestCase):
     """Task 4 adds sasthotech-desktop.yml and enables these tests."""
 
@@ -219,6 +287,30 @@ class WrapperWorkflowTests(unittest.TestCase):
         self.assertIn("aarch64-apple-darwin", text)
         self.assertNotIn("android", text.lower())
         self.assertNotIn("ios", text.lower())
+
+    @unittest.skipUnless(HAS_YAML and WRAPPER.exists(), "PyYAML or wrapper missing")
+    def test_wrapper_calls_reusable_workflow_with_sasthotech_profile(self):
+        doc = load_yaml(WRAPPER)
+        self.assertEqual(doc["on"], {"workflow_dispatch": None})
+        build = doc["jobs"]["build"]
+        self.assertEqual(
+            build["uses"], "./.github/workflows/flutter-build.yml"
+        )
+        with_block = build["with"]
+        self.assertTrue(with_block["upload-artifact"])
+        self.assertEqual(with_block["upload-tag"], "sasthotech-test")
+        self.assertEqual(with_block["build-profile"], "sasthotech-desktop")
+        self.assertEqual(
+            json.loads(with_block["windows-matrix"]),
+            [EXPECTED_WINDOWS_MATRIX[0]],
+        )
+        self.assertEqual(
+            json.loads(with_block["linux-matrix"]),
+            [EXPECTED_LINUX_MATRIX[0]],
+        )
+        self.assertEqual(
+            json.loads(with_block["macos-matrix"]), EXPECTED_MACOS_MATRIX
+        )
 
 
 class TextFallbackTests(unittest.TestCase):
