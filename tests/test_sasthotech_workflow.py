@@ -351,6 +351,117 @@ class InstallerUploadTests(unittest.TestCase):
         self.assertIn(f"path: {MACOS_DMG_TARGET}", upload_block)
 
 
+DESKTOP_FLUTTER_JOBS = [
+    "build-for-windows-flutter",
+    "build-for-macOS",
+    "build-rustdesk-linux",
+]
+
+REGISTRATION_ENV_KEYS = (
+    "SASTHOTECH_REGISTRATION_URL",
+    "SASTHOTECH_REGISTRATION_TOKEN",
+)
+
+ARCH_LINUX_STEPS = [
+    "Patch archlinux PKGBUILD",
+    "Build archlinux package",
+    "Publish archlinux package",
+]
+
+VALIDATION_STEP = "Validate registration webhook configuration"
+
+
+class RegistrationWebhookConfigTests(unittest.TestCase):
+    def setUp(self):
+        self.workflow = BUILD.read_text()
+        if HAS_YAML:
+            self.doc = load_yaml(BUILD)
+        else:
+            self.doc = None
+
+    @unittest.skipUnless(HAS_YAML, "PyYAML not installed")
+    def test_desktop_jobs_define_registration_secret_env(self):
+        for job_id in DESKTOP_FLUTTER_JOBS:
+            with self.subTest(job=job_id):
+                env = self.doc["jobs"][job_id]["env"]
+                for key in REGISTRATION_ENV_KEYS:
+                    self.assertEqual(
+                        env[key],
+                        f"${{{{ secrets.{key} }}}}",
+                    )
+
+    @unittest.skipUnless(HAS_YAML, "PyYAML not installed")
+    def test_desktop_jobs_validate_registration_on_sasthotech_profile(self):
+        for job_id in DESKTOP_FLUTTER_JOBS:
+            with self.subTest(job=job_id):
+                steps = self.doc["jobs"][job_id]["steps"]
+                validation = next(
+                    step
+                    for step in steps
+                    if step.get("name") == VALIDATION_STEP
+                )
+                self.assertEqual(
+                    validation["if"], "inputs.build-profile == 'sasthotech-desktop'"
+                )
+                run = validation["run"]
+                for key in REGISTRATION_ENV_KEYS:
+                    self.assertIn(f"${key}", run)
+
+    @unittest.skipUnless(HAS_YAML, "PyYAML not installed")
+    def test_linux_docker_forwards_registration_env_to_cargo_container(self):
+        steps = self.doc["jobs"]["build-rustdesk-linux"]["steps"]
+        build_step = next(
+            step for step in steps if step.get("name") == "Build rustdesk"
+        )
+        docker_args = build_step["with"]["dockerRunArgs"]
+        self.assertIn("--env SASTHOTECH_REGISTRATION_URL", docker_args)
+        self.assertIn("--env SASTHOTECH_REGISTRATION_TOKEN", docker_args)
+        self.assertNotIn("${{ secrets.", docker_args)
+
+    @unittest.skipUnless(HAS_YAML, "PyYAML not installed")
+    def test_archlinux_steps_skip_sasthotech_desktop_profile(self):
+        steps = self.doc["jobs"]["build-rustdesk-linux"]["steps"]
+        for step_name in ARCH_LINUX_STEPS:
+            with self.subTest(step=step_name):
+                step = next(s for s in steps if s.get("name") == step_name)
+                self.assertIn(
+                    "inputs.build-profile != 'sasthotech-desktop'", step["if"]
+                )
+
+    def test_desktop_jobs_define_registration_secret_env_text(self):
+        for job_id in DESKTOP_FLUTTER_JOBS:
+            with self.subTest(job=job_id):
+                block = job_text_block(self.workflow, job_id)
+                for key in REGISTRATION_ENV_KEYS:
+                    self.assertIn(f"{key}: ${{{{ secrets.{key} }}}}", block)
+
+    def test_linux_docker_forwards_registration_env_text(self):
+        block = job_text_block(self.workflow, "build-rustdesk-linux")
+        docker_match = re.search(
+            r"dockerRunArgs: \|\n"
+            r"            --volume \"\$\{PWD\}:/workspace\"\n"
+            r"            --volume \"/opt/artifacts:/opt/artifacts\"\n"
+            r"            --env SASTHOTECH_REGISTRATION_URL\n"
+            r"            --env SASTHOTECH_REGISTRATION_TOKEN",
+            block,
+        )
+        self.assertIsNotNone(
+            docker_match, "cargo container dockerRunArgs must forward registration env"
+        )
+        docker_args = docker_match.group(0)
+        self.assertNotIn("${{ secrets.", docker_args)
+
+    def test_archlinux_steps_skip_sasthotech_desktop_profile_text(self):
+        for step_name in ARCH_LINUX_STEPS:
+            with self.subTest(step=step_name):
+                block = step_block_in_job(
+                    self.workflow, "build-rustdesk-linux", step_name
+                )
+                self.assertIn(
+                    "inputs.build-profile != 'sasthotech-desktop'", block
+                )
+
+
 class WrapperWorkflowTests(unittest.TestCase):
     """Task 4 adds sasthotech-desktop.yml and enables these tests."""
 
