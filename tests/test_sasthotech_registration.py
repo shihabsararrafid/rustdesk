@@ -20,6 +20,10 @@ NOTIFY = "crate::install_registration::notify_after_server_registration()"
 
 
 class RegistrationSourceTests(unittest.TestCase):
+    def test_module_imports_hbb_common_log_and_tokio(self):
+        text = REGISTRATION.read_text()
+        self.assertIn("use hbb_common::{config::Config, log, tokio};", text)
+
     def test_module_is_desktop_gated(self):
         text = LIB.read_text()
         self.assertRegex(
