@@ -42,7 +42,7 @@ magick /tmp/sasthotech-master.png -resize 32x32 res/32x32.png
 magick /tmp/sasthotech-master.png -resize 64x64 res/64x64.png
 magick /tmp/sasthotech-master.png -resize 128x128 res/128x128.png
 magick /tmp/sasthotech-master.png -resize 256x256 res/128x128@2x.png
-magick /tmp/sasthotech-master.png -resize 256x256 res/icon.png
+magick /tmp/sasthotech-master.png -resize 1024x1024 res/icon.png
 magick /tmp/sasthotech-master.png -resize 1024x1024 res/mac-icon.png
 
 rm -rf /tmp/SasthotechRemote.iconset
@@ -81,3 +81,14 @@ iconutil -c iconset flutter/macos/Runner/AppIcon.icns -o /tmp/verify.iconset
 test -s res/mac-tray-dark-x2.png
 test -s res/scalable.svg
 ```
+
+## Git note
+
+Repository `.gitignore` contains global `*png` and `*svg` rules. New branding
+sources under `res/branding/` must be force-added:
+
+```bash
+git add -f res/branding/sasthotech-logo.png res/branding/sasthotech-tray.svg
+```
+
+Tracked regenerations of existing `res/*.png` files can use a normal `git add`.

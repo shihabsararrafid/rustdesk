@@ -406,3 +406,15 @@ test("retryFailedEmails retries only explicit email_failed rows", () => {
   assert.equal(runtime.__rows[3][7], "email_pending");
   assert.equal(runtime.__emails.length, 1);
 });
+
+test("doPost rejects oversized payloads before JSON parse", () => {
+  const runtime = createMockRuntime();
+  const oversized = "x".repeat(4097);
+  const response = parseResponse(
+    runtime.doPost({ postData: { contents: oversized } })
+  );
+  assert.equal(response.accepted, false);
+  assert.equal(response.error, "payload_too_large");
+  assert.equal(runtime.__rows.length, 2);
+  assert.equal(runtime.__emails.length, 0);
+});

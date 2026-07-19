@@ -349,7 +349,7 @@ jobs:
         if: env.UPLOAD_ARTIFACT == 'true'
         run: |
           pushd ./res/msi
-          python preprocess.py --arp -d ../../rustdesk
+          python preprocess.py --arp -d ../../rustdesk --app-name rustdesk --display-name "Sasthotech Remote"
           nuget restore msi.sln
           $msiPlatform = if ('${{ matrix.job.arch }}' -eq 'aarch64') { 'ARM64' } else { 'x64' }
           msbuild msi.sln -p:Configuration=Release -p:Platform=$msiPlatform /p:TargetVersion=Windows10
@@ -1705,14 +1705,25 @@ jobs:
                 mv "$name" /workspace/"${name%%.rpm}-suse.rpm"
             done
 
+      - name: Rename Sasthotech Linux installers
+        if: env.UPLOAD_ARTIFACT == 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          for f in rustdesk-*.deb rustdesk-*.rpm; do
+            mv -- "$f" "sasthotech-remote-${f#rustdesk-}"
+          done
+          ls -la sasthotech-remote-*.deb sasthotech-remote-*.rpm
+
       - name: Upload Sasthotech Linux installers
         if: env.UPLOAD_ARTIFACT == 'true'
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: sasthotech-remote-linux-${{ matrix.job.arch }}
           path: |
-            rustdesk-*.deb
-            rustdesk-*.rpm
+            sasthotech-remote-*.deb
+            sasthotech-remote-*.rpm
           if-no-files-found: error
 
       - name: Publish debian/rpm package
@@ -1723,15 +1734,15 @@ jobs:
           prerelease: true
           tag_name: ${{ env.TAG_NAME }}
           files: |
-            rustdesk-*.deb
-            rustdesk-*.rpm
+            sasthotech-remote-*.deb
+            sasthotech-remote-*.rpm
 
       - name: Upload deb
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         if: env.UPLOAD_ARTIFACT == 'true'
         with:
-          name: rustdesk-${{ env.VERSION }}-${{ matrix.job.arch }}.deb
-          path: rustdesk-${{ env.VERSION }}-${{ matrix.job.arch }}.deb
+          name: sasthotech-remote-${{ env.VERSION }}-${{ matrix.job.arch }}.deb
+          path: sasthotech-remote-${{ env.VERSION }}-${{ matrix.job.arch }}.deb
 
       # only x86_64 for arch since we can not find newest arm64 docker image to build
       # old arch image does not make sense for arch since it is "arch" which always update to date

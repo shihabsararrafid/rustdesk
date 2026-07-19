@@ -320,14 +320,36 @@ class InstallerUploadTests(unittest.TestCase):
         self.assertIn("sasthotech-remote-windows-${{ matrix.job.arch }}", block)
 
     def test_linux_installer_upload_includes_deb_and_rpm(self):
-        block = step_block_in_job(
+        job = job_text_block(self.workflow, "build-rustdesk-linux")
+        rename = step_block_in_job(
+            self.workflow,
+            "build-rustdesk-linux",
+            "Rename Sasthotech Linux installers",
+        )
+        upload = step_block_in_job(
             self.workflow,
             "build-rustdesk-linux",
             "Upload Sasthotech Linux installers",
         )
-        self.assertIn("rustdesk-*.deb", block)
-        self.assertIn("rustdesk-*.rpm", block)
-        self.assertIn("sasthotech-remote-linux-${{ matrix.job.arch }}", block)
+        publish = step_block_in_job(
+            self.workflow,
+            "build-rustdesk-linux",
+            "Publish debian/rpm package",
+        )
+        self.assertIn('mv -- "$f" "sasthotech-remote-${f#rustdesk-}"', rename)
+        self.assertIn("sasthotech-remote-*.deb", upload)
+        self.assertIn("sasthotech-remote-*.rpm", upload)
+        self.assertIn("sasthotech-remote-linux-${{ matrix.job.arch }}", upload)
+        self.assertIn("sasthotech-remote-*.deb", publish)
+        self.assertIn("sasthotech-remote-*.rpm", publish)
+        # User-facing Flutter Linux artifact globs must not remain rustdesk-*.
+        for block in (upload, publish):
+            self.assertNotRegex(block, r"(?m)^\s+rustdesk-\*\.(deb|rpm)\s*$")
+        self.assertIn("Rename Sasthotech Linux installers", job)
+        self.assertLess(
+            job.index("Rename Sasthotech Linux installers"),
+            job.index("Upload Sasthotech Linux installers"),
+        )
 
     def test_macos_installer_upload_uses_branded_dmg_path(self):
         block = step_block_in_job(

@@ -45,3 +45,23 @@ class BrandingTests(unittest.TestCase):
         for name in ("rustdesk.desktop", "rustdesk-link.desktop"):
             text = (ROOT / "res" / name).read_text()
             self.assertIn("Name=Sasthotech Remote", text)
+
+    def test_windows_visible_branding_preserves_internal_exe(self):
+        runner = (ROOT / "flutter/windows/runner/Runner.rc").read_text()
+        portable = (ROOT / "libs/portable/Cargo.toml").read_text()
+        workflow = (ROOT / ".github/workflows/flutter-build.yml").read_text()
+        preprocess = (ROOT / "res/msi/preprocess.py").read_text()
+
+        self.assertIn('VALUE "ProductName", "Sasthotech Remote"', runner)
+        self.assertIn('VALUE "FileDescription", "Sasthotech Remote"', runner)
+        self.assertIn('VALUE "InternalName", "rustdesk"', runner)
+        self.assertIn('VALUE "OriginalFilename", "rustdesk.exe"', runner)
+
+        self.assertIn('ProductName = "Sasthotech Remote"', portable)
+        self.assertIn('FileDescription = "Sasthotech Remote"', portable)
+        self.assertIn('OriginalFilename = "rustdesk.exe"', portable)
+
+        self.assertIn('--display-name "Sasthotech Remote"', workflow)
+        self.assertIn("--app-name rustdesk", workflow)
+        self.assertIn("--display-name", preprocess)
+        self.assertIn("display_name", preprocess)

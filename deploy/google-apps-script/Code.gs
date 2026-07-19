@@ -12,9 +12,13 @@ function jsonResponse(value) {
 
 function doPost(e) {
   try {
+    const raw = (e.postData && e.postData.contents) || "";
+    if (raw.length > 4096) {
+      return jsonResponse({ accepted: false, error: "payload_too_large" });
+    }
     const properties = PropertiesService.getScriptProperties();
     const result = validateRegistration(
-      JSON.parse((e.postData && e.postData.contents) || "{}"),
+      JSON.parse(raw || "{}"),
       properties.getProperty("CLIENT_TOKEN")
     );
     if (!result.ok) return jsonResponse({ accepted: false, error: result.error });
