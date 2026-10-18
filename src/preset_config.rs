@@ -16,6 +16,11 @@ pub const PRESET_PASSWORD_SALT: &str = "2ZVNxXswWhRcRYuDF7b9Ox1U5sosQyKE";
 /// before user config is read, so these act as editable prefilled defaults
 /// (a value the user later saves locally wins via the normal option lookup).
 pub fn apply() {
+    if let Some(url) = crate::employee_management::api_url() {
+        let mut enforced = config::OVERWRITE_SETTINGS.write().unwrap();
+        enforced.insert("api-server".to_owned(), url.to_owned());
+        enforced.insert("employee-management-url".to_owned(), url.to_owned());
+    }
     *config::APP_NAME.write().unwrap() = PRESET_APP_NAME.to_owned();
 
     {

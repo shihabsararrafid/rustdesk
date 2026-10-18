@@ -176,7 +176,8 @@ impl ChangeDisplayRecord {
 #[cfg(not(any(target_os = "android", target_os = "ios")))]
 impl SessionPermissionConfig {
     pub fn is_text_clipboard_required(&self) -> bool {
-        *self.server_clipboard_enabled.read().unwrap()
+        self.lc.read().unwrap().management_policy.as_ref().map(|p| p.allow_clipboard).unwrap_or(true)
+            && *self.server_clipboard_enabled.read().unwrap()
             && *self.server_keyboard_enabled.read().unwrap()
             && !self.lc.read().unwrap().disable_clipboard.v
             && !self.lc.read().unwrap().view_only.v
@@ -185,7 +186,8 @@ impl SessionPermissionConfig {
     #[cfg(feature = "unix-file-copy-paste")]
     pub fn is_file_clipboard_required(&self) -> bool {
         let lc = self.lc.read().unwrap();
-        *self.server_keyboard_enabled.read().unwrap()
+        lc.management_policy.as_ref().map(|p| p.allow_clipboard && p.allow_file_transfer).unwrap_or(true)
+            && *self.server_keyboard_enabled.read().unwrap()
             && *self.server_file_transfer_enabled.read().unwrap()
             && lc.enable_file_copy_paste.v
             && !lc.view_only.v
@@ -415,7 +417,8 @@ impl<T: InvokeUiSession> Session<T> {
 
     #[cfg(not(target_os = "ios"))]
     pub fn is_text_clipboard_required(&self) -> bool {
-        *self.server_clipboard_enabled.read().unwrap()
+        self.lc.read().unwrap().management_policy.as_ref().map(|p| p.allow_clipboard).unwrap_or(true)
+            && *self.server_clipboard_enabled.read().unwrap()
             && *self.server_keyboard_enabled.read().unwrap()
             && !self.lc.read().unwrap().disable_clipboard.v
             && !self.lc.read().unwrap().view_only.v
@@ -424,7 +427,8 @@ impl<T: InvokeUiSession> Session<T> {
     #[cfg(any(target_os = "windows", feature = "unix-file-copy-paste"))]
     pub fn is_file_clipboard_required(&self) -> bool {
         let lc = self.lc.read().unwrap();
-        *self.server_keyboard_enabled.read().unwrap()
+        lc.management_policy.as_ref().map(|p| p.allow_clipboard && p.allow_file_transfer).unwrap_or(true)
+            && *self.server_keyboard_enabled.read().unwrap()
             && *self.server_file_transfer_enabled.read().unwrap()
             && lc.enable_file_copy_paste.v
             && !lc.view_only.v
@@ -1771,6 +1775,10 @@ impl<T: InvokeUiSession> Interface for Session<T> {
     }
 
     fn send(&self, data: Data) {
+        if self.lc.read().unwrap().management_policy.as_ref().map(|p| !p.permits_data(&data)).unwrap_or(false) {
+            log::warn!("Employee policy blocked an outbound action");
+            return;
+        }
         if let Some(sender) = self.sender.read().unwrap().as_ref() {
             sender.send(data).ok();
         }
@@ -1972,6 +1980,7 @@ pub async fn io_loop<T: InvokeUiSession>(handler: Session<T>, round: u32) {
         } else if handler.args.len() == 0 {
             let pfs = handler.lc.read().unwrap().port_forwards.clone();
             let mut queues = HashMap::<i32, mpsc::UnboundedSender<Data>>::new();
+            let mut listeners = tokio::task::JoinSet::new();
             for d in pfs {
                 sender.send(Data::AddPortForward(d)).ok();
             }
@@ -1986,7 +1995,7 @@ pub async fn io_loop<T: InvokeUiSession>(handler: Session<T>, round: u32) {
                         let handler = handler.clone();
                         let key = key.clone();
                         let token = token.clone();
-                        tokio::spawn(async move {
+                        listeners.spawn(async move {
                             start_one_port_forward(
                                 handler,
                                 port,
@@ -2004,7 +2013,7 @@ pub async fn io_loop<T: InvokeUiSession>(handler: Session<T>, round: u32) {
                             s.send(Data::Close).ok();
                         }
                     }
-                    Some(Data::Close) => {
+                    Some(Data::Close) | None => {
                         break;
                     }
                     Some(d) => {
@@ -2014,6 +2023,14 @@ pub async fn io_loop<T: InvokeUiSession>(handler: Session<T>, round: u32) {
                     }
                     _ => {}
                 }
+            }
+            for queue in queues.values() {
+                if queue.send(Data::Close).is_err() {
+                    log::debug!("Port-forward listener already closed");
+                }
+            }
+            while let Some(result) = listeners.join_next().await {
+                if let Err(error) = result { log::warn!("Port-forward listener ended unexpectedly: {}", error); }
             }
         } else {
             let port = handler.args[0].parse::<i32>().unwrap_or(0);

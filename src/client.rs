@@ -205,12 +205,16 @@ impl Client {
             &'static str,
         ),
         (i32, String),
+        Option<crate::employee_management::Audit>,
     )> {
         debug_assert!(peer == interface.get_id());
         interface.update_direct(None);
         interface.update_received(false);
+        let audit = crate::employee_management::authorize(peer, conn_type).await?;
+        interface.get_lch().write().unwrap().management_policy = audit.as_ref().map(|a| a.policy.clone());
         match Self::_start(peer, key, token, conn_type, interface.clone()).await {
             Err(err) => {
+                if let Some(audit) = audit { audit.flush().await; }
                 let err_str = err.to_string();
                 if err_str.starts_with("Failed") {
                     bail!(err_str + ": Please try later");
@@ -229,7 +233,7 @@ impl Client {
                         interface.get_lch().write().unwrap().set_direct_failure(n);
                     }
                 }
-                Ok((x.0, x.1))
+                Ok((x.0, x.1, audit))
             }
         }
     }
@@ -1732,6 +1736,7 @@ struct ConnToken {
 /// Login config handler for [`Client`].
 #[derive(Default)]
 pub struct LoginConfigHandler {
+    pub management_policy: Option<crate::employee_management::Policy>,
     id: String,
     pub conn_type: ConnType,
     pub is_terminal_admin: bool,

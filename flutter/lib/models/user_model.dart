@@ -146,6 +146,9 @@ class UserModel {
 
   // update ab and group status
   static Future<void> updateOtherModels() async {
+    if ((await bind.mainGetOption(key: 'employee-management-url')).isNotEmpty) {
+      return;
+    }
     await Future.wait([
       gFFI.abModel.pullAb(force: ForcePullAb.listAndCurrent, quiet: false),
       gFFI.groupModel.pull()

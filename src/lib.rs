@@ -42,6 +42,7 @@ mod clipboard;
 #[cfg(not(any(target_os = "android", target_os = "ios")))]
 pub mod core_main;
 mod custom_server;
+mod employee_management;
 #[cfg(any(target_os = "windows", target_os = "linux", target_os = "macos"))]
 mod install_registration;
 mod lang;

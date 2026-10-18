@@ -78,6 +78,14 @@ fn install_android_deps() {
 }
 
 fn main() {
+    println!("cargo:rerun-if-env-changed=SASTHOTECH_EMPLOYEE_API");
+    println!("cargo:rerun-if-env-changed=SASTHOTECH_EMPLOYEE_MODE");
+    if std::env::var("SASTHOTECH_EMPLOYEE_MODE").as_deref() == Ok("1") {
+        let value = std::env::var("SASTHOTECH_EMPLOYEE_API").unwrap_or_default();
+        if value.is_empty() || !value.starts_with("https://") {
+            panic!("SASTHOTECH_EMPLOYEE_API must be a nonempty HTTPS origin; unset it for customer builds");
+        }
+    }
     hbb_common::gen_version();
     install_android_deps();
     #[cfg(all(windows, feature = "inline"))]

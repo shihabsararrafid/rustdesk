@@ -2,6 +2,15 @@ name: Sasthotech Desktop Build
 
 on:
   workflow_dispatch:
+    inputs:
+      employee-mode:
+        description: Build the managed employee client (customer build when false)
+        type: boolean
+        default: false
+      management-url:
+        description: HTTPS management origin, required for employee mode
+        type: string
+        default: ""
 
 jobs:
   build:
@@ -11,6 +20,8 @@ jobs:
       upload-artifact: true
       upload-tag: "sasthotech-test"
       build-profile: "sasthotech-desktop"
+      employee-mode: ${{ inputs.employee-mode }}
+      management-url: ${{ inputs.management-url }}
       windows-helper-matrix: >-
         [{"target":"windows-2022","platform":"x64"}]
       windows-matrix: >-

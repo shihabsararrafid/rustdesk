@@ -83,6 +83,7 @@ pub struct Remote<T: InvokeUiSession> {
     chroma: Arc<RwLock<Option<Chroma>>>,
     last_record_state: bool,
     sent_close_reason: bool,
+    employee_audit: Option<crate::employee_management::Audit>,
 }
 
 #[derive(Default)]
@@ -132,6 +133,7 @@ impl<T: InvokeUiSession> Remote<T> {
             chroma: Default::default(),
             last_record_state: false,
             sent_close_reason: false,
+            employee_audit: None,
         }
     }
 
@@ -178,7 +180,8 @@ impl<T: InvokeUiSession> Remote<T> {
         )
         .await
         {
-            Ok(((mut peer, direct, pk, kcp, stream_type), (feedback, rendezvous_server))) => {
+            Ok(((mut peer, direct, pk, kcp, stream_type), (feedback, rendezvous_server), audit)) => {
+                self.employee_audit = audit;
                 self.handler
                     .connection_round_state
                     .lock()
@@ -196,6 +199,7 @@ impl<T: InvokeUiSession> Remote<T> {
                         tokio::time::sleep(KCP_CLOSE_REASON_FLUSH_DELAY).await;
                     }
                     self.handle_disconnected(round);
+                    if let Some(audit) = self.employee_audit.take() { audit.flush().await; }
                     return;
                 }
                 self.handler.update_direct(Some(direct));
@@ -359,6 +363,7 @@ impl<T: InvokeUiSession> Remote<T> {
             }
         }
         self.handle_disconnected(round);
+        if let Some(audit) = self.employee_audit.take() { audit.flush().await; }
     }
 
     fn handle_disconnected(&self, round: u32) {
@@ -399,6 +404,9 @@ impl<T: InvokeUiSession> Remote<T> {
                     self.handler.msgbox(&r#type, &title, &text, "");
                 }
                 _ => {
+                    if self.employee_audit.as_ref().map(|a| !a.policy.allow_clipboard || !a.policy.allow_file_transfer).unwrap_or(false) {
+                        return;
+                    }
                     let is_stopping_allowed = clip.is_stopping_allowed();
                     let server_file_transfer_enabled =
                         *self.handler.server_file_transfer_enabled.read().unwrap();
@@ -563,8 +571,12 @@ impl<T: InvokeUiSession> Remote<T> {
     }
 
     async fn handle_msg_from_ui(&mut self, data: Data, peer: &mut Stream) -> bool {
+        if let Some(audit) = &self.employee_audit {
+            if !audit.policy.permits_data(&data) { return true; }
+        }
         match data {
             Data::Close => {
+                if let Some(audit) = &self.employee_audit { audit.finish("completed"); }
                 self.send_close_reason(peer, "").await;
                 return false;
             }
@@ -1319,6 +1331,9 @@ impl<T: InvokeUiSession> Remote<T> {
 
     async fn handle_msg_from_peer(&mut self, data: &[u8], peer: &mut Stream) -> bool {
         if let Ok(msg_in) = Message::parse_from_bytes(&data) {
+            if let Some(audit) = &self.employee_audit {
+                if !audit.policy.permits_message(&msg_in) { return true; }
+            }
             match msg_in.union {
                 Some(message::Union::VideoFrame(vf)) => {
                     if !self.first_frame {
@@ -1368,6 +1383,7 @@ impl<T: InvokeUiSession> Remote<T> {
                         }
                     }
                     Some(login_response::Union::PeerInfo(pi)) => {
+                        if let Some(audit) = &self.employee_audit { audit.authenticated(); }
                         let peer_version = pi.version.clone();
                         let peer_platform = pi.platform.clone();
                         self.set_peer_info(&pi);

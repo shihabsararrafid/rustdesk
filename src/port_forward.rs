@@ -61,8 +61,13 @@ pub async fn listen(
         run_rdp(addr.port());
     }
     let mut ui_receiver = ui_receiver;
+    let mut forwards = tokio::task::JoinSet::new();
+    let (shutdown, _) = tokio::sync::watch::channel(false);
     loop {
         tokio::select! {
+            result = forwards.join_next(), if !forwards.is_empty() => {
+                if let Some(Err(error)) = result { log::warn!("Tunnel task ended unexpectedly: {}", error); }
+            }
             Ok((forward, addr)) = listener.accept() => {
                 log::info!("new connection from {:?}", addr);
                 lc.write().unwrap().port_forward = (remote_host.clone(), remote_port);
@@ -71,12 +76,21 @@ pub async fn listen(
                 let mut forward = Framed::new(forward, BytesCodec::new());
                 let mut close_port_forward = false;
                 match connect_and_login(&id, &password, &mut ui_receiver, interface.clone(), &mut forward, key, token, is_rdp, &mut close_port_forward).await {
-                    Ok(Some(stream)) => {
+                    Ok(Some((stream, audit))) => {
                         let interface = interface.clone();
-                        tokio::spawn(async move {
-                            if let Err(err) = run_forward(forward, stream).await {
+                        let mut stop = shutdown.subscribe();
+                        forwards.spawn(async move {
+                            let result: ResultType<()> = tokio::select! {
+                                result = run_forward(forward, stream) => result,
+                                _ = stop.changed() => Ok(()),
+                            };
+                            if let Some(audit) = &audit {
+                                audit.finish(if result.is_ok() { "completed" } else { "connection_error" });
+                            }
+                            if let Err(err) = result {
                                 interface.msgbox("error", "Error", &err.to_string(), "");
                             }
+                            if let Some(audit) = audit { audit.flush().await; }
                             log::info!("connection from {:?} closed", addr);
                        });
                     }
@@ -91,7 +105,7 @@ pub async fn listen(
             }
             d = ui_receiver.recv() => {
                 match d {
-                    Some(Data::Close) => {
+                    Some(Data::Close) | None => {
                         break;
                     }
                     Some(Data::NewRDP) => {
@@ -102,6 +116,12 @@ pub async fn listen(
                 }
             }
         }
+    }
+    if shutdown.send(true).is_err() && !forwards.is_empty() {
+        log::warn!("Tunnel shutdown receiver unavailable");
+    }
+    while let Some(result) = forwards.join_next().await {
+        if let Err(error) = result { log::warn!("Tunnel task ended unexpectedly: {}", error); }
     }
     Ok(())
 }
@@ -116,14 +136,15 @@ async fn connect_and_login(
     token: &str,
     is_rdp: bool,
     close_port_forward: &mut bool,
-) -> ResultType<Option<Stream>> {
+) -> ResultType<Option<(Stream, Option<crate::employee_management::Audit>)>> {
     let conn_type = if is_rdp {
         ConnType::RDP
     } else {
         ConnType::PORT_FORWARD
     };
-    let ((mut stream, direct, _pk, _kcp, _stream_type), (feedback, rendezvous_server)) =
+    let ((mut stream, direct, _pk, _kcp, _stream_type), (feedback, rendezvous_server), audit) =
         Client::start(id, key, token, conn_type, interface.clone()).await?;
+    let result: ResultType<Option<Stream>> = async {
     interface.update_direct(Some(direct));
     if !stream.is_secured() && !crate::common::is_direct_ip_access(id) {
         if !confirm_insecure_connection(&interface, ui_receiver).await {
@@ -159,6 +180,7 @@ async fn connect_and_login(
                                 }
                             }
                             Some(login_response::Union::PeerInfo(pi)) => {
+                                if let Some(audit) = &audit { audit.authenticated(); }
                                 interface.handle_peer_info(pi);
                                 break;
                             }
@@ -179,6 +201,10 @@ async fn connect_and_login(
             },
             d = ui_receiver.recv() => {
                 match d {
+                    Some(Data::Close) | None => {
+                        *close_port_forward = true;
+                        return Ok(None);
+                    }
                     Some(Data::Login((os_username, os_password, password, remember))) => {
                         interface.handle_login_from_ui(os_username, os_password, password, remember, &mut stream).await;
                     }
@@ -202,6 +228,14 @@ async fn connect_and_login(
         allow_err!(stream.send_bytes(buffer.into()).await);
     }
     Ok(Some(stream))
+    }.await;
+    match result {
+        Ok(Some(stream)) => Ok(Some((stream, audit))),
+        result => {
+            if let Some(audit) = audit { audit.flush().await; }
+            result.map(|_| None)
+        }
+    }
 }
 
 async fn run_forward(forward: Framed<TcpStream, BytesCodec>, stream: Stream) -> ResultType<()> {

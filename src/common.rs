@@ -1045,6 +1045,9 @@ pub fn get_custom_rendezvous_server(custom: String) -> String {
 
 #[inline]
 pub fn get_api_server(api: String, custom: String) -> String {
+    if let Some(url) = crate::employee_management::api_url() {
+        return url.trim_end_matches('/').to_owned();
+    }
     if Config::no_register_device() {
         return "".to_owned();
     }

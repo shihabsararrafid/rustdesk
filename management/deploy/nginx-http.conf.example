@@ -1,0 +1,14 @@
+# Replace this hostname before enabling; use Certbot to add HTTPS.
+server {
+    listen 80;
+    server_name management.example.com;
+    client_max_body_size 2m;
+    location / {
+        proxy_pass http://127.0.0.1:21114;
+        proxy_set_header Host $host;
+        proxy_set_header Authorization $http_authorization;
+        proxy_connect_timeout 5s;
+        proxy_read_timeout 120s;
+        proxy_send_timeout 30s;
+    }
+}

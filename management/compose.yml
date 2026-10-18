@@ -1,0 +1,54 @@
+services:
+  management:
+    build: .
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:21114:21114"
+    environment:
+      MANAGEMENT_DATABASE: /data/management.db
+      MANAGEMENT_PUBLIC_ORIGIN: ${MANAGEMENT_PUBLIC_ORIGIN:-https://localhost}
+      MANAGEMENT_SESSION_SECONDS: ${MANAGEMENT_SESSION_SECONDS:-28800}
+      MANAGEMENT_MEDIA_ROOT: /media
+    volumes:
+      - management-data:/data
+      - management-media:/media
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    read_only: true
+    tmpfs:
+      - /tmp
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:21114/readyz', timeout=3)"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+
+  media-worker:
+    build: .
+    command: ["python", "-m", "app.cli", "process-recordings"]
+    restart: unless-stopped
+    depends_on:
+      management:
+        condition: service_healthy
+    environment:
+      MANAGEMENT_DATABASE: /data/management.db
+      MANAGEMENT_MEDIA_ROOT: /media
+    volumes:
+      - management-data:/data
+      - management-media:/media
+    network_mode: none
+    read_only: true
+    tmpfs:
+      - /tmp
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    mem_limit: 2g
+    cpus: 1
+
+volumes:
+  management-data:
+  management-media:
